@@ -9,6 +9,7 @@ from app.models.post import Post
 from app.ingestion.mock_adapter import generate_mock_posts
 from app.ingestion.reddit_adapter import RedditAdapter
 from app.ingestion.telegram_adapter import TelegramAdapter
+from app.ingestion.x_adapter import XAdapter
 
 # 1. Initialize the Router First
 router = APIRouter(prefix="/ingest", tags=["Data Ingestion"])
@@ -149,3 +150,33 @@ async def ingest_batch_live(db: Session = Depends(get_db)):
         "total_fetched": len(all_posts),
         "newly_inserted": inserted_count
     }
+
+@router.post("/x", summary="Fetch/stimulate real time posts from X (Twitter)")
+async def ingest_x_data(query: str = "technology", limit: int = 15, db: Session = Depends(get_db)):
+    adapter = XAdapter()
+    x_posts = await adapter.fetch_posts(query=query, limit=limit)
+    inserted_count = 0
+
+    for item in x_posts:
+        stmt = insert(Post).values(
+            platform=item.platform,
+            platform_post_id=item.platform_post_id,
+            author_id=item.author_id,
+            author_username=item.author_username,
+            author_bio=item.author_bio,
+            text=item.text,
+            language=item.language,
+            created_at=item.created_at,
+            parent_post_id=item.parent_post_id,
+            engagement_count=item.engagement_count,
+            raw_data=item.raw_data,
+            is_processed=False
+        ).on_conflict_do_nothing(
+            index_elements=["platform", "platform_post_id"]
+        )
+        res = db.execute(stmt)
+        inserted_count += cast(CursorResult, res).rowcount
+
+    db.commit()
+    return {"status": "success", "fetched": len(x_posts), "inserted_new_records": inserted_count}
+        

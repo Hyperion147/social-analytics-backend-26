@@ -11,13 +11,22 @@ LOCATION_KEYWORDS = {
     "International": ["usa", "uk", "california", "london", "canada", "germany", "singapore"]
 }
 
+AGE_PROFILES = {
+    "18-24 (Gen-Z / Students)": ["student", "undergrad", "college", "intern", "cs"],
+    "25-34 (Professionals)": ["engineer", "developer", "founder", "manager", "pro", "analyst"],
+    "35-50 (Senior Leads)": ["director", "lead", "architect", "senior", "head", "news"]
+}
+
 def compute_demographics_breakdown(db: Session) -> dict:
     posts = db.query(Post.author_bio, Post.language).all()
     total = len(posts) or 1
     
-    age_counts = Counter({"18-24 (Gen-Z / Students)": 0, "25-34 (Professionals)": 0, "35-50 (Senior Leads)": 0, "Unclassified": 0})
+    age_counts = Counter({k: 0 for k in AGE_PROFILES})
+    age_counts["Unclassified"] = 0
+
     geo_counts = Counter({k: 0 for k in LOCATION_KEYWORDS})
     geo_counts["Other / Undefined"] = 0
+
     lang_counts = Counter()
 
     for bio, lang in posts:
@@ -30,13 +39,13 @@ def compute_demographics_breakdown(db: Session) -> dict:
         bio_lower = bio.lower()
         
         # Age inference
-        if any(term in bio_lower for term in ["student", "undergrad", "college", "intern", "cs"]):
-            age_counts["18-24 (Gen-Z / Students)"] += 1
-        elif any(term in bio_lower for term in ["engineer", "developer", "founder", "manager", "pro", "analyst"]):
-            age_counts["25-34 (Professionals)"] += 1
-        elif any(term in bio_lower for term in ["director", "lead", "architect", "senior", "head"]):
-            age_counts["35-50 (Senior Leads)"] += 1
-        else:
+        matched_age = False
+        for segment, terms in AGE_PROFILES.items():
+            if any(term in bio_lower for term in terms):
+                age_counts[segment] += 1
+                matched_age = True
+                break
+        if not matched_age:
             age_counts["Unclassified"] += 1
             
         # Geographic inference
