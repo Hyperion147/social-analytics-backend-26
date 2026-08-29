@@ -1,21 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy.dialects.postgresql import insert
-
-from app.core.database import get_db
-from app.models.post import Post
-from app.schemas.social import NormalizedPost
-from app.ingestion.mock_adapter import generate_mock_posts
-
-router = APIRouter(prefix="/ingest", tags=["Data Ingestion"])
-
-@router.post("/mock", summary="Generate & insert mock social media posts")
-def ingest_mock_data(count: int = 30, db: Session = Depends(get_db)):
-    mock_posts = generate_mock_posts(count=count)
+@router.post("/batch-live", summary="Fetch live data across multiple subreddits and Telegram channels simultaneously")
+async def ingest_batch_live(db: Session = Depends(get_db)):
+    reddit_adapter = RedditAdapter()
+    telegram_adapter = TelegramAdapter()
+    
+    subreddits = ["technology", "artificial", "MachineLearning", "dataisbeautiful"]
+    channels = ["techcrunch", "durov", "telegram"]
+    
+    all_posts = []
+    
+    for sub in subreddits:
+        posts = await reddit_adapter.fetch_posts(query=sub, limit=15)
+        all_posts.extend(posts)
+        
+    for ch in channels:
+        posts = await telegram_adapter.fetch_posts(query=ch, limit=15)
+        all_posts.extend(posts)
+        
     inserted_count = 0
-
-    for item in mock_posts:
-        # Idempotent upsert on (platform, platform_post_id)
+    for item in all_posts:
         stmt = insert(Post).values(
             platform=item.platform,
             platform_post_id=item.platform_post_id,
@@ -32,12 +34,13 @@ def ingest_mock_data(count: int = 30, db: Session = Depends(get_db)):
         ).on_conflict_do_nothing(
             index_elements=["platform", "platform_post_id"]
         )
-        result = db.execute(stmt)
-        inserted_count += result.rowcount
-
+        res = db.execute(stmt)
+        inserted_count += res.rowcount
+        
     db.commit()
     return {
         "status": "success",
-        "generated": len(mock_posts),
-        "inserted_new_records": inserted_count
+        "total_sources_queried": len(subreddits) + len(channels),
+        "total_fetched": len(all_posts),
+        "newly_inserted": inserted_count
     }
